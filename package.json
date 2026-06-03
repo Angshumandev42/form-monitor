@@ -1,0 +1,19 @@
+{
+  "name": "vc-form-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless-browser health check for marketing forms on vantagecircle.com and vantagefit.io",
+  "main": "monitor.js",
+  "scripts": {
+    "monitor": "node monitor.js",
+    "dry": "node monitor.js --dry",
+    "headed": "node monitor.js --headed",
+    "single": "node monitor.js --only="
+  },
+  "dependencies": {
+    "playwright-core": "^1.45.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

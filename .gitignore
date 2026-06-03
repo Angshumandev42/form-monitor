@@ -1,0 +1,5 @@
+node_modules/
+
+# Runtime artifacts (screenshots, HTML dumps, inspect logs, run history)
+logs/*
+!logs/.gitkeep
