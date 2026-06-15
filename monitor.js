@@ -18,6 +18,7 @@
 const { chromium } = require('playwright-core');
 const fs = require('fs');
 const path = require('path');
+const { sendReport } = require('./notify');
 
 const ROOT = __dirname;
 const CONFIG_PATH = path.join(ROOT, 'pages.config.json');
@@ -419,6 +420,10 @@ async function testPage(browser, page, cfg) {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 VC-Form-Monitor',
+    // The remote cloud sandbox routes HTTPS through an egress proxy; when a host
+    // is reached through it the cert chain can fail validation. Forms are known
+    // production sites, so ignore cert errors rather than report false navigate failures.
+    ignoreHTTPSErrors: true,
   });
   const tab = await context.newPage();
 
@@ -535,6 +540,12 @@ async function main() {
   const stamp = timestamp();
   const runPath = path.join(RUN_DIR, `${stamp}.json`);
   fs.writeFileSync(runPath, JSON.stringify({ ranAt: new Date().toISOString(), dryRun: DRY_RUN, results }, null, 2));
+
+  // Email the report (no-op if Gmail OAuth env vars are unset, e.g. local dry runs).
+  if (!DRY_RUN) {
+    const outcome = await sendReport(results, path.relative(ROOT, runPath));
+    if (!outcome.sent) console.warn(`[form-monitor] report not emailed: ${outcome.reason}`);
+  }
 
   const failures = results.filter(r => !r.ok);
   if (failures.length) {
