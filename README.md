@@ -115,6 +115,6 @@ This way the LLM only does diagnostic summarization; the actual probing is deter
 ## 9. Known limitations (v1)
 
 - Submit-only verification. We confirm the form *thinks* it succeeded; we do **not** verify HubSpot actually created the contact, that downstream workflows fired, or that confirmation emails reached an inbox. Add those checks if a silent breakage ever slips past this layer.
-- No live email alerting yet — failures only land in `logs/failures.log` and the /schedule run output. Add SMTP/Resend later when you're ready.
+- Email alerting goes out via Resend (`notify.js`), which needs `RESEND_API_KEY` set on the routine's cloud environment. Until a sending domain is verified in Resend and `RESEND_FROM` is set, the report uses Resend's shared test sender, which delivers **only to the Resend account's own address** — cc recipients are dropped automatically to avoid a 403 on the whole send. With no transport configured at all, `sendReport` no-ops and results stay in `logs/failures.log` plus the routine run output.
 - Forms behind a CTA/modal aren't currently supported automatically (see §6).
 - The `country`/`state`/`industry` placeholder values may not match the dropdown options on every form. The field-filler picks the first non-empty option as a fallback, which is fine for monitoring.

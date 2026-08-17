@@ -1,25 +1,40 @@
 /**
- * Email the form-monitor report via the Gmail REST API (OAuth2 refresh token).
+ * Email the form-monitor report. Two transports, picked by which env vars are set:
  *
- * Why the Gmail API and not the Gmail MCP connector: the connector only exposes
- * create_draft (no send), so scheduled remote runs could never actually deliver.
- * This module sends over plain HTTPS, which works through the remote sandbox's
- * HTTP/HTTPS egress proxy once the two Google API hosts are allowlisted.
+ *   1. Resend (preferred) — one API key, a single HTTPS POST, no OAuth dance.
+ *   2. Gmail REST API (fallback) — OAuth2 refresh token.
  *
- * Required env (set as environment variables on the routine's cloud environment):
+ * Both send over plain HTTPS, which works through the remote sandbox's egress
+ * proxy once the API host is allowlisted. The Gmail MCP connector is deliberately
+ * not used: scheduled remote runs need a transport that works headless.
+ *
+ * Resend env:
+ *   RESEND_API_KEY  API key from resend.com  (required to select this transport)
+ *   RESEND_FROM     From address; MUST be on a domain verified in Resend.
+ *                   Falls back to REPORT_FROM, then to Resend's shared test
+ *                   sender, which can ONLY deliver to your own Resend account
+ *                   address — cc recipients will silently not receive it.
+ *
+ * Gmail env (used only when RESEND_API_KEY is absent):
  *   GMAIL_CLIENT_ID      OAuth client id (Desktop app)
  *   GMAIL_CLIENT_SECRET  OAuth client secret
  *   GMAIL_REFRESH_TOKEN  refresh token with scope gmail.send (minted once via scripts/get-refresh-token.js)
- * Optional env (sensible defaults below):
- *   REPORT_FROM  From address (defaults to the authorized Gmail account)
+ *
+ * Shared optional env:
  *   REPORT_TO    primary recipient(s), comma-separated
  *   REPORT_CC    cc recipient(s), comma-separated
  *
- * Egress allowlist needed: oauth2.googleapis.com, gmail.googleapis.com
+ * Egress allowlist: api.resend.com (Resend) or oauth2.googleapis.com +
+ * gmail.googleapis.com (Gmail).
  */
 
 const DEFAULT_TO = 'angshuman.talukdar@vantagecircle.com';
 const DEFAULT_CC = 'himashree.sarma@vantagecircle.com,gayatri.nath@vantagecircle.com';
+const RESEND_TEST_FROM = 'Form Monitor <onboarding@resend.dev>';
+
+function addrList(s) {
+  return String(s || '').split(',').map(x => x.trim()).filter(Boolean);
+}
 
 function base64url(str) {
   return Buffer.from(str, 'utf8').toString('base64')
@@ -84,22 +99,69 @@ async function getAccessToken() {
   return data.access_token;
 }
 
+async function sendViaResend({ to, cc, subject, body }) {
+  const from = process.env.RESEND_FROM || process.env.REPORT_FROM || RESEND_TEST_FROM;
+  const testMode = from === RESEND_TEST_FROM;
+
+  // Resend's shared test sender may only deliver to the address that owns the
+  // Resend account. Any other recipient 403s the WHOLE send, so drop cc rather
+  // than lose the report entirely. Verify a domain and set RESEND_FROM to cc.
+  if (testMode) {
+    console.warn('[form-monitor] RESEND_FROM unset — using Resend\'s shared test sender.');
+    console.warn(`[form-monitor] cc dropped in test mode (${cc || 'none'}); only the Resend account address will receive this.`);
+    cc = '';
+  }
+
+  const payload = { from, to: addrList(to), subject, text: body };
+  const ccList = addrList(cc);
+  if (ccList.length) payload.cc = ccList;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id) {
+    // Resend returns { statusCode, name, message } on failure.
+    const reason = `Resend send failed (${res.status}): ${data.message || data.name || JSON.stringify(data)}`;
+    console.error(`[form-monitor] ${reason}`);
+    return { sent: false, reason };
+  }
+  console.log(`[form-monitor] report emailed to ${to}${cc ? ` (cc ${cc})` : ''} — id ${data.id}`);
+  return { sent: true, subject };
+}
+
 /**
  * Send the report. Returns { sent: boolean, reason?: string, subject?: string }.
  * Never throws — email failure must not mask the monitor result.
  */
 async function sendReport(results, runPath) {
+  const to = process.env.REPORT_TO || DEFAULT_TO;
+  const cc = process.env.REPORT_CC || DEFAULT_CC;
+  const { subject, body } = buildSummary(results, runPath);
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      return await sendViaResend({ to, cc, subject, body });
+    } catch (err) {
+      const reason = `Resend send error: ${err.message}`;
+      console.error(`[form-monitor] ${reason}`);
+      return { sent: false, reason };
+    }
+  }
+
   const { GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN } = process.env;
   if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
-    const reason = 'Gmail OAuth env vars missing (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN) — skipping email.';
+    const reason = 'No email transport configured — set RESEND_API_KEY, or all three of GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN. Skipping email.';
     console.warn(`[form-monitor] ${reason}`);
     return { sent: false, reason };
   }
 
-  const to = process.env.REPORT_TO || DEFAULT_TO;
-  const cc = process.env.REPORT_CC || DEFAULT_CC;
   const from = process.env.REPORT_FROM || 'me';
-  const { subject, body } = buildSummary(results, runPath);
 
   try {
     const accessToken = await getAccessToken();
