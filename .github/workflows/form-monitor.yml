@@ -1,0 +1,56 @@
+name: Form Monitor
+
+# Runs the Playwright form health check every 3 days.
+#
+# This lives in GitHub Actions rather than the Anthropic cloud routine because
+# that sandbox's egress proxy could not reach vantagecircle.com / vantagefit.io
+# (see README §9) — every scheduled run there returned a false 0/7. Actions
+# runners have unrestricted outbound network and Chrome preinstalled.
+
+on:
+  schedule:
+    # 03:00 UTC = 08:30 IST, every 3rd day of the month.
+    - cron: '0 3 */3 * *'
+  workflow_dispatch: # allows a manual run from the Actions tab
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # monitor.js launches via `channel: 'chrome'`, so it needs the real
+      # Google Chrome build rather than a Playwright-downloaded Chromium.
+      # It is preinstalled on ubuntu-latest; fail loudly if that ever changes.
+      - name: Verify Chrome is present
+        run: google-chrome --version
+
+      - name: Install dependencies
+        run: npm install
+
+      # Exits non-zero when any form fails, which correctly marks the job red
+      # and triggers GitHub's own failure notification — a second alert channel
+      # independent of Resend.
+      - name: Run form monitor
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Optional overrides; notify.js falls back to its built-in defaults.
+          RESEND_FROM: ${{ vars.RESEND_FROM }}
+          REPORT_TO: ${{ vars.REPORT_TO }}
+          REPORT_CC: ${{ vars.REPORT_CC }}
+        run: npm run monitor
+
+      # Keep the JSON result even when the run fails, so a red job is diagnosable.
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: form-monitor-logs
+          path: logs/runs/
+          retention-days: 30
