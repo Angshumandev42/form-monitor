@@ -402,6 +402,61 @@ async function collectErrors(ctx) {
   return [...new Set(errs)].slice(0, 10);
 }
 
+/**
+ * Post-submit forensics. HubSpot's rejection text ("Please complete this
+ * required field") never says WHICH field, so on failure we walk the form and
+ * record what every field actually holds plus any error message pinned to it.
+ *
+ * This is the only way to diagnose a failure that reproduces on the CI runner
+ * but not locally — the runner is gone seconds after the run, so whatever we
+ * don't capture here is lost.
+ */
+async function captureFieldState(ctx) {
+  return ctx.$$eval(
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea',
+    nodes => nodes.map(n => {
+      const wrap = n.closest('.hs-form-field, .field, .form-group') || n.parentElement;
+      const labelText = (() => {
+        if (n.id) {
+          const l = document.querySelector(`label[for="${CSS.escape(n.id)}"]`);
+          if (l) return l.innerText || '';
+        }
+        return n.closest('label')?.innerText || '';
+      })();
+      const isToggle = n.type === 'checkbox' || n.type === 'radio';
+      const raw = String(n.value == null ? '' : n.value);
+      return {
+        name: n.getAttribute('name') || n.getAttribute('id') || '(unnamed)',
+        type: n.tagName.toLowerCase() === 'select' ? 'select' : n.type,
+        // HubSpot marks required with a .hs-form-required span rather than the
+        // native attribute, so check both.
+        required: n.required || n.getAttribute('aria-required') === 'true'
+          || !!wrap?.querySelector('.hs-form-required'),
+        visible: n.offsetParent !== null,
+        empty: isToggle ? !n.checked : !raw.trim(),
+        value: isToggle ? (n.checked ? 'checked' : 'unchecked') : raw.slice(0, 60),
+        label: (labelText || n.getAttribute('placeholder') || '').replace(/\s+/g, ' ').trim().slice(0, 90),
+        error: (wrap?.querySelector('.hs-error-msg, .hs-error-msgs, .field-error, [role="alert"]')
+          ?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 140) || null,
+      };
+    })
+  ).catch(() => []);
+}
+
+/**
+ * Turn captured field state into named culprits for the alert email.
+ * Required-but-empty fields first (the actual cause), then any field carrying
+ * an inline error message.
+ */
+function describeFieldFaults(fields) {
+  const blank = fields.filter(f => f.visible && f.required && f.empty);
+  const errored = fields.filter(f => f.error && !blank.includes(f));
+  return [
+    ...blank.map(f => `${f.name} is required but empty`),
+    ...errored.map(f => `${f.name}: ${f.error}`),
+  ];
+}
+
 async function testPage(browser, page, cfg) {
   const result = {
     slug: page.slug,
@@ -482,6 +537,11 @@ async function testPage(browser, page, cfg) {
     } else {
       const errs = await collectErrors(ctx);
       result.validationErrors = errs;
+      const fields = await captureFieldState(ctx);
+      const faults = describeFieldFaults(fields);
+      // Only attach the full field dump on failure — it would bloat every run log.
+      result.fields = fields;
+      result.fieldFaults = faults;
       const captchaHit = errs.some(e => /captcha|recaptcha|turnstile|are you a robot/i.test(e));
       const fieldErrors = errs.filter(e => !/captcha|recaptcha|turnstile|are you a robot/i.test(e));
       if (page.captchaProtected && captchaHit && fieldErrors.length === 0) {
@@ -490,9 +550,12 @@ async function testPage(browser, page, cfg) {
         result.ok = true;
         result.detail = 'captcha-rejected: form healthy, captcha blocked automation (expected for captchaProtected pages)';
       } else {
-        result.detail = errs.length
-          ? `Form validation errors: ${errs.join(' | ')}`
-          : success.detail;
+        // Prefer the named culprit over HubSpot's anonymous complaint.
+        result.detail = faults.length
+          ? `Form rejected: ${faults.join('; ')}`
+          : errs.length
+            ? `Form validation errors: ${errs.join(' | ')}`
+            : success.detail;
       }
     }
   } catch (err) {

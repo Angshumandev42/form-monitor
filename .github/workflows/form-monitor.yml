@@ -57,11 +57,18 @@ jobs:
             npm run monitor
           fi
 
-      # Keep the JSON result even when the run fails, so a red job is diagnosable.
-      - name: Upload run logs
+      # Keep the evidence even when the run fails, so a red job is diagnosable.
+      # The runner is destroyed seconds after the job ends, so anything not
+      # uploaded here is gone: logs/runs/ is the JSON result, logs/debug/ is the
+      # full-page screenshot + page HTML that monitor.js writes per failing form.
+      - name: Upload run logs and failure evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: form-monitor-logs
-          path: logs/runs/
+          path: |
+            logs/runs/
+            logs/debug/
+            logs/failures.log
+          if-no-files-found: warn
           retention-days: 30
