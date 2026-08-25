@@ -17,6 +17,10 @@ on:
         description: 'Dry run — locate and fill forms but do NOT submit (no HubSpot test contacts, no email)'
         type: boolean
         default: false
+      only:
+        description: 'Test a single page by slug (e.g. request-demo). Blank runs all of them.'
+        type: string
+        default: ''
 
 jobs:
   monitor:
@@ -50,11 +54,16 @@ jobs:
           REPORT_TO: ${{ vars.REPORT_TO }}
           REPORT_CC: ${{ vars.REPORT_CC }}
         run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            ARGS="--only=${{ github.event.inputs.only }}"
+            echo "Targeting a single page: ${{ github.event.inputs.only }}"
+          fi
           if [ "${{ github.event.inputs.dry }}" = "true" ]; then
             echo "DRY RUN — forms will be located and filled but not submitted."
-            npm run dry
+            node monitor.js --dry $ARGS
           else
-            npm run monitor
+            node monitor.js $ARGS
           fi
 
       # Keep the evidence even when the run fails, so a red job is diagnosable.
