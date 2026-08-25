@@ -33,6 +33,10 @@ const ONLY_SLUG = argOnly ? argOnly.split('=')[1] : null;
 const DRY_RUN = args.has('--dry');
 const HEADED = args.has('--headed');
 
+// Deep enough for any real lead form; a backstop against a step loop that
+// never terminates because the form keeps re-rendering.
+const MAX_FORM_STEPS = 5;
+
 const PLACEHOLDER = {
   firstname: 'Form',
   lastname: 'Monitor',
@@ -329,12 +333,61 @@ async function findSubmitButton(ctx) {
     'button:has-text("Get")',
     'button:has-text("Request")',
     'button:has-text("Book")',
+    // Multi-step forms advance through a control that is not always a submit.
+    'button:has-text("Next")',
+    'button:has-text("Continue")',
   ];
+  // Prefer something actually on screen: a gated form can keep the real submit
+  // in the DOM on step 1, and clicking that instead of "Next" skips the step
+  // machinery entirely.
+  let fallback = null;
   for (const sel of candidates) {
-    const el = await ctx.$(sel);
-    if (el) return el;
+    for (const el of await ctx.$$(sel)) {
+      if (await el.isVisible().catch(() => false)) return el;
+      if (!fallback) fallback = el;
+    }
   }
-  return null;
+  return fallback;
+}
+
+/**
+ * Which fields are on screen right now, as a comparable string.
+ *
+ * This is how we detect a step boundary. Looking for a button labelled "Next"
+ * would be fragile — the label varies per form ("Continue", "Book a Meeting")
+ * and the same page serves different variants to different visitors — whereas
+ * every multi-step form swaps its visible field set when it advances.
+ */
+async function stepSignature(ctx) {
+  return ctx.$$eval(
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea',
+    nodes => nodes
+      .filter(n => n.offsetParent !== null)
+      .map(n => n.getAttribute('name') || n.getAttribute('id') || n.type)
+      .join(',')
+  );
+}
+
+/**
+ * After clicking the action button, decide what the form did:
+ *
+ *   'advanced' — a different set of fields is on screen; fill them and go again
+ *   'gone'     — the form is finished with (submitted, replaced, or navigated)
+ *   'same'     — nothing moved; either the final step or a rejected submit
+ */
+async function waitForStepChange(tab, ctx, before, startUrl, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await tab.waitForTimeout(250);
+    // A redirect is the end of the road; bail immediately rather than sit out
+    // the timeout on every page that submits by navigating.
+    try { if (tab.url() !== startUrl) return 'gone'; } catch { return 'gone'; }
+    let now;
+    try { now = await stepSignature(ctx); } catch { return 'gone'; }
+    if (!now) return 'gone';
+    if (now !== before) return 'advanced';
+  }
+  return 'same';
 }
 
 async function detectSuccess(page, ctx, cfg, startUrl) {
@@ -526,17 +579,39 @@ async function testPage(browser, page, cfg) {
 
     result.stage = 'submit';
     const startUrl = tab.url();
-    const submitBtn = await findSubmitButton(ctx);
-    if (!submitBtn) {
-      result.detail = 'Could not find submit button';
-      return result;
-    }
-    await submitBtn.click({ timeout: 5000 }).catch(async () => {
-      await ctx.evaluate(() => {
-        const f = document.querySelector('form');
-        if (f) f.requestSubmit ? f.requestSubmit() : f.submit();
+
+    // Walk the form one step at a time. Single-step forms simply exit after the
+    // first pass, so this costs them nothing beyond the change check.
+    const steps = [];
+    for (let step = 1; step <= MAX_FORM_STEPS; step++) {
+      const before = await stepSignature(ctx).catch(() => '');
+      const submitBtn = await findSubmitButton(ctx);
+      if (!submitBtn) {
+        if (step === 1) {
+          result.detail = 'Could not find submit button';
+          return result;
+        }
+        break;
+      }
+      await submitBtn.click({ timeout: 5000 }).catch(async () => {
+        await ctx.evaluate(() => {
+          const f = document.querySelector('form');
+          if (f) f.requestSubmit ? f.requestSubmit() : f.submit();
+        });
       });
-    });
+
+      const moved = await waitForStepChange(tab, ctx, before, startUrl);
+      steps.push({ step, outcome: moved, fieldsOnStep: before });
+      if (moved !== 'advanced') break;
+
+      result.stage = `fill-step-${step + 1}`;
+      const more = await fillFormFields(ctx, buildEmail(cfg, page.slug));
+      result.fieldsFilled += more.length;
+    }
+    if (steps.length > 1) {
+      result.stepsTraversed = steps.length;
+      result.steps = steps;
+    }
 
     result.stage = 'verify';
     const success = await detectSuccess(tab, ctx, cfg, startUrl);

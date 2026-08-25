@@ -36,11 +36,33 @@ What happens per page:
 1. Navigate, dismiss cookie/consent overlays.
 2. Scroll to lazy-load HubSpot embed.
 3. Fill fields (`firstname`, `lastname`, `email`, `company`, `phone`, `country`, message, plus required checkboxes/selects).
-4. Click the submit button (or call `form.requestSubmit()` as fallback).
-5. Watch up to 15s for any of:
+4. Click the action button (or call `form.requestSubmit()` as fallback).
+5. Work out what the form did, by comparing which fields are on screen before
+   and after the click:
+   - **a different field set** — the form advanced a step. Fill the new fields
+     and click again, up to `MAX_FORM_STEPS` (5).
+   - **no fields left, or the URL changed** — the form is done; go verify.
+   - **nothing moved** — the final step, or a rejected submit; go verify.
+6. Watch up to 25s for any of:
    - URL change to a path matching `successUrlPatterns` (thank-you, success, confirmation, ...)
    - `.submitted-message` / `.hs-form-success` element appearing (HubSpot's standard)
    - Body text matching `defaultSuccessPatterns` **and** the form being removed from the DOM
+
+### Multi-step forms
+
+Some pages serve a gated form that reveals its fields across two screens
+("STEP 1 OF 2"), and which variant you get can depend on where you are browsing
+from — `/request-demo/` served a single-step form to an Indian IP and a
+two-step one to a US datacenter IP on the same day. Step detection is therefore
+based on the *visible field set changing*, not on finding a button labelled
+"Next": labels vary per form and per variant, and the advance control is not
+always a `type="submit"`.
+
+Consequence worth knowing: a gated form validates its hidden fields too, so
+clicking through without handling steps produces "Please complete all required
+fields" while every field you can see is filled. When a run fails that way the
+report names the offending fields and marks them `hidden — behind a later step
+or collapsed group`.
 
 Exit code is `0` if all pages pass, `1` if any fail (so /schedule + cron can detect failure).
 
@@ -117,4 +139,11 @@ This way the LLM only does diagnostic summarization; the actual probing is deter
 - Submit-only verification. We confirm the form *thinks* it succeeded; we do **not** verify HubSpot actually created the contact, that downstream workflows fired, or that confirmation emails reached an inbox. Add those checks if a silent breakage ever slips past this layer.
 - Email alerting goes out via Resend (`notify.js`), which needs `RESEND_API_KEY` set on the routine's cloud environment. Until a sending domain is verified in Resend and `RESEND_FROM` is set, the report uses Resend's shared test sender, which delivers **only to the Resend account's own address** — cc recipients are dropped automatically to avoid a 403 on the whole send. With no transport configured at all, `sendReport` no-ops and results stay in `logs/failures.log` plus the routine run output.
 - Forms behind a CTA/modal aren't currently supported automatically (see §6).
+- `--dry` stops before the first click, so on a multi-step form it only ever
+  sees and fills step 1. `fieldsFilled` will look low and the later steps go
+  unexercised; use a live run to check a gated form end to end.
+- Step detection reads the visible field set, so a form that advances without
+  changing which fields are on screen (an in-place re-render keeping identical
+  field names) reads as "nothing moved" and gets verified as if it were the
+  final step.
 - The `country`/`state`/`industry` placeholder values may not match the dropdown options on every form. The field-filler picks the first non-empty option as a fallback, which is fine for monitoring.
