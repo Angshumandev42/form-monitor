@@ -451,10 +451,19 @@ async function captureFieldState(ctx) {
 function describeFieldFaults(fields) {
   const blank = fields.filter(f => f.visible && f.required && f.empty);
   const errored = fields.filter(f => f.error && !blank.includes(f));
-  return [
+  const faults = [
     ...blank.map(f => `${f.name} is required but empty`),
-    ...errored.map(f => `${f.name}: ${f.error}`),
+    // A field we never saw cannot be one we failed to fill. When the form
+    // rejects hidden required fields it is gated — a later step, or a
+    // collapsed group — and the monitor needs to advance it, not fill harder.
+    ...errored.map(f => f.visible
+      ? `${f.name}: ${f.error}`
+      : `${f.name} (hidden — behind a later step or collapsed group): ${f.error}`),
   ];
+  if (errored.some(f => !f.visible)) {
+    faults.push('Form looks multi-step: required fields are rejected while still hidden, so submit never advances.');
+  }
+  return faults;
 }
 
 async function testPage(browser, page, cfg) {
