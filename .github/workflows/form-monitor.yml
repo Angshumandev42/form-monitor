@@ -1,6 +1,6 @@
 name: Form Monitor
 
-# Runs the Playwright form health check every 3 days.
+# Runs the Playwright form health check twice a month (1st and 15th).
 #
 # This lives in GitHub Actions rather than the Anthropic cloud routine because
 # that sandbox's egress proxy could not reach vantagecircle.com / vantagefit.io
@@ -9,8 +9,8 @@ name: Form Monitor
 
 on:
   schedule:
-    # 03:00 UTC = 08:30 IST, every 3rd day of the month.
-    - cron: '0 3 */3 * *'
+    # 03:00 UTC = 08:30 IST, on the 1st and 15th of each month.
+    - cron: '0 3 1,15 * *'
   workflow_dispatch: # allows a manual run from the Actions tab
     inputs:
       dry:
