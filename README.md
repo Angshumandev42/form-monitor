@@ -64,7 +64,7 @@ fields" while every field you can see is filled. When a run fails that way the
 report names the offending fields and marks them `hidden — behind a later step
 or collapsed group`.
 
-Exit code is `0` if all pages pass, `1` if any fail (so /schedule + cron can detect failure).
+Exit code is `0` if all pages pass, `1` if any fail (so the scheduled GitHub Actions job goes red on failure).
 
 ## 4. Single-page debugging
 
@@ -109,23 +109,18 @@ If a page hides its form behind a "Request demo" button, the auto-detector won't
 - **Quick fix**: change the page URL in config to a direct link that lands you on the form (most HubSpot forms have a direct page).
 - **Robust fix**: add a `preActions` array to the page config (e.g. `[{"click": "button:has-text('Request a demo')"}]`) and extend `monitor.js` to honor it. Not implemented yet — add when first needed.
 
-## 7. Wiring to /schedule (every 3 days at 8 AM IST)
+## 7. Schedule (GitHub Actions, 1st and 15th at 08:30 IST)
 
-In Claude Code:
+The monitor runs from `.github/workflows/form-monitor.yml` on GitHub Actions:
 
-```
-/schedule
-```
+- **Cron**: `0 3 1,15 * *` (03:00 UTC = 08:30 IST, on the 1st and 15th of each month). GitHub may start a scheduled run a few minutes late.
+- **Manual run**: Actions tab → *Form Monitor* → *Run workflow*. Tick `dry` to locate and fill forms without submitting, or set `only` to a page slug (e.g. `request-demo`) to test one page.
+- **Alerts**: the Resend email report (needs the `RESEND_API_KEY` repo secret; `RESEND_FROM`, `REPORT_TO`, `REPORT_CC` are optional repo variables). A failing form also turns the job red, which triggers GitHub's own failure email as a second channel.
+- **Evidence**: `logs/` is uploaded as a run artifact (kept 30 days) on every run, including failed ones.
 
-…then create a routine like:
+To change the frequency, edit the `cron` line in the workflow and push to `main`.
 
-- **Name**: `vc-form-monitor`
-- **Cron**: `0 2 */3 * *`  (08:00 IST = 02:30 UTC; adjust per your shell's TZ — `30 2 */3 * *` if your cron honors minutes-first IST=UTC+5:30)
-- **Working directory**: `/Users/angshumandevtalukdar/thinker/form-monitor`
-- **Prompt**: 
-  > Run `npm run monitor` in this directory. If the command exits non-zero, summarize the failing pages from `logs/failures.log` (the latest digest block) and the most recent `logs/runs/*.json`. Include slug, URL, stage where it failed, and the `detail` field. If it exits zero, just say "All forms passing as of <timestamp>".
-
-This way the LLM only does diagnostic summarization; the actual probing is deterministic Node code.
+This used to run as a Claude Code `/schedule` cloud routine, but that sandbox's egress proxy could not reach vantagecircle.com / vantagefit.io, so every run reported a false 0/7. Actions runners have open outbound network and Chrome preinstalled.
 
 ## 8. Files
 
@@ -137,7 +132,7 @@ This way the LLM only does diagnostic summarization; the actual probing is deter
 ## 9. Known limitations (v1)
 
 - Submit-only verification. We confirm the form *thinks* it succeeded; we do **not** verify HubSpot actually created the contact, that downstream workflows fired, or that confirmation emails reached an inbox. Add those checks if a silent breakage ever slips past this layer.
-- Email alerting goes out via Resend (`notify.js`), which needs `RESEND_API_KEY` set on the routine's cloud environment. Until a sending domain is verified in Resend and `RESEND_FROM` is set, the report uses Resend's shared test sender, which delivers **only to the Resend account's own address** — cc recipients are dropped automatically to avoid a 403 on the whole send. With no transport configured at all, `sendReport` no-ops and results stay in `logs/failures.log` plus the routine run output.
+- Email alerting goes out via Resend (`notify.js`), which needs the `RESEND_API_KEY` secret set on the GitHub repo. Until a sending domain is verified in Resend and `RESEND_FROM` is set, the report uses Resend's shared test sender, which delivers **only to the Resend account's own address** — cc recipients are dropped automatically to avoid a 403 on the whole send. With no transport configured at all, `sendReport` no-ops and results stay in `logs/failures.log` plus the Actions run log and artifact.
 - Forms behind a CTA/modal aren't currently supported automatically (see §6).
 - `--dry` stops before the first click, so on a multi-step form it only ever
   sees and fills step 1. `fieldsFilled` will look low and the later steps go

@@ -4,7 +4,7 @@ name: Form Monitor
 #
 # This lives in GitHub Actions rather than the Anthropic cloud routine because
 # that sandbox's egress proxy could not reach vantagecircle.com / vantagefit.io
-# (see README §9) — every scheduled run there returned a false 0/7. Actions
+# (see README §7) — every scheduled run there returned a false 0/7. Actions
 # runners have unrestricted outbound network and Chrome preinstalled.
 
 on:
