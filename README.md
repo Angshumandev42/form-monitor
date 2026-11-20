@@ -47,6 +47,13 @@ What happens per page:
    - URL change to a path matching `successUrlPatterns` (thank-you, success, confirmation, ...)
    - `.submitted-message` / `.hs-form-success` element appearing (HubSpot's standard)
    - Body text matching `defaultSuccessPatterns` **and** the form being removed from the DOM
+7. For pages with `"expectScheduler": true` (the demo forms), also wait up to
+   20s for the RevenueHero meeting scheduler popup. It renders as `#rh-dialog`
+   wrapping `#rh-scheduler-iframe`, served from `popup.schedulehero.io`
+   (RevenueHero's booking host, not `revenuehero.io`). If the form submits but
+   the popup never shows, the page fails and the report lists every
+   RevenueHero call the page made, which tells a routing failure apart from a
+   popup that did not render.
 
 ### Multi-step forms
 

@@ -519,6 +519,30 @@ function describeFieldFaults(fields) {
   return faults;
 }
 
+// RevenueHero opens its scheduler as a popup after the HubSpot submit succeeds. Loading the SDK proves
+// nothing on its own, so after a successful submit we wait for the popup.
+// The popup is #rh-dialog wrapping #rh-scheduler-iframe, served from
+// popup.schedulehero.io (RevenueHero's white-label booking host).
+async function detectScheduler(tab, rhRequests, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const frame = tab.frames().find(f => /schedulehero\.io|revenuehero\.io/i.test(f.url()) && !/scheduler\.min\.js/i.test(f.url()));
+    if (frame) {
+      const el = await frame.frameElement().catch(() => null);
+      const visible = el ? await el.isVisible().catch(() => false) : false;
+      if (visible) return { shown: true, signal: 'iframe', detail: frame.url().split('?')[0] };
+    }
+    const dom = await tab.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('#rh-dialog, #rh-scheduler-iframe, iframe[src*="schedulehero" i], [id*="revenuehero" i], [class*="revenuehero" i], iframe[src*="revenuehero" i]'));
+      const v = els.find(e => { const r = e.getBoundingClientRect(); return r.width > 50 && r.height > 50 && getComputedStyle(e).visibility !== 'hidden'; });
+      return v ? `${v.tagName.toLowerCase()}#${v.id || ''}.${String(v.className || '').slice(0, 60)}` : null;
+    }).catch(() => null);
+    if (dom) return { shown: true, signal: 'dom', detail: dom };
+    await tab.waitForTimeout(500);
+  }
+  return { shown: false, signal: 'timeout', detail: `No RevenueHero scheduler within ${timeoutMs / 1000}s`, rhRequests: rhRequests.slice(0, 15) };
+}
+
 async function testPage(browser, page, cfg) {
   const result = {
     slug: page.slug,
@@ -543,6 +567,13 @@ async function testPage(browser, page, cfg) {
     ignoreHTTPSErrors: true,
   });
   const tab = await context.newPage();
+  // Every call to RevenueHero after page load (router qualify, availability,
+  // etc.) — evidence for diagnosing a scheduler that never opened.
+  const rhRequests = [];
+  tab.on('request', r => {
+    const u = r.url();
+    if (/revenuehero|schedulehero/i.test(u) && !/scheduler\.min\.js/i.test(u)) rhRequests.push(`${r.method()} ${u.split('?')[0]}`);
+  });
 
   try {
     result.stage = 'navigate';
@@ -618,6 +649,17 @@ async function testPage(browser, page, cfg) {
     if (success.ok) {
       result.ok = true;
       result.detail = `${success.signal}: ${success.detail}`;
+      if (page.expectScheduler) {
+        result.stage = 'verify-scheduler';
+        const sched = await detectScheduler(tab, rhRequests);
+        result.scheduler = sched;
+        if (sched.shown) {
+          result.detail += ` | RevenueHero scheduler shown (${sched.signal})`;
+        } else {
+          result.ok = false;
+          result.detail = `Form submitted, but RevenueHero scheduler did not appear. ${sched.detail}. RevenueHero calls seen: ${sched.rhRequests.length ? sched.rhRequests.join(', ') : 'none'}`;
+        }
+      }
     } else {
       const errs = await collectErrors(ctx);
       result.validationErrors = errs;

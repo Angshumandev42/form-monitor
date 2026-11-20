@@ -1,7 +1,9 @@
 {
   "testEmailDomain": "vantagecircle.com",
   "testEmailLocal": "formtest",
-  "alertRecipients": ["angshuman.talukdar@vantagecircle.com"],
+  "alertRecipients": [
+    "angshuman.talukdar@vantagecircle.com"
+  ],
   "defaultTimeoutMs": 45000,
   "defaultSuccessPatterns": [
     "thank you",
@@ -28,62 +30,91 @@
     {
       "slug": "pulse-survey-buyers-guide",
       "url": "https://www.vantagecircle.com/resources/pulse-survey-buyers-guide/",
-      "label": "Resource — Pulse Survey Buyer's Guide",
+      "label": "Resource \u2014 Pulse Survey Buyer's Guide",
       "notes": "Gated resource download. Likely HubSpot form. Submission usually triggers redirect to a thank-you page with download link."
     },
     {
       "slug": "industry-report-hybrid-leadership",
       "url": "https://www.vantagecircle.com/hr-academy/industry-reports/industry-report-effective-leadership-paths-to-hybrid-work-culture/",
-      "label": "Industry Report — Hybrid Leadership",
+      "label": "Industry Report \u2014 Hybrid Leadership",
       "notes": "Gated industry report. Form behind the 'Download the Report' button.",
       "preActions": [
-        { "type": "clickByText", "text": "Download the Report" },
-        { "type": "wait", "ms": 2500 }
+        {
+          "type": "clickByText",
+          "text": "Download the Report"
+        },
+        {
+          "type": "wait",
+          "ms": 2500
+        }
       ]
     },
     {
       "slug": "request-demo",
       "url": "https://www.vantagecircle.com/request-demo/",
-      "label": "Request Demo — Vantage Circle",
-      "notes": "Primary lead form. Captcha-protected — we verify front-end health only (form loads, fields wired, submit reaches server).",
-      "captchaProtected": true
+      "label": "Request Demo \u2014 Vantage Circle",
+      "notes": "Primary lead form. Captcha-protected \u2014 we verify front-end health only (form loads, fields wired, submit reaches server).",
+      "captchaProtected": true,
+      "expectScheduler": true
     },
     {
       "slug": "product-rewards-recognition",
       "url": "https://www.vantagecircle.com/products/rewards-recognition/",
-      "label": "Product — Rewards & Recognition",
+      "label": "Product \u2014 Rewards & Recognition",
       "notes": "Form lazy-loads into .hubspot-form-container at #rewardsForm.",
       "preActions": [
-        { "type": "scrollTo", "selector": "#rewardsForm, .hubspot-form-container" },
-        { "type": "wait", "ms": 2500 }
-      ]
+        {
+          "type": "scrollTo",
+          "selector": "#rewardsForm, .hubspot-form-container"
+        },
+        {
+          "type": "wait",
+          "ms": 2500
+        }
+      ],
+      "expectScheduler": true
     },
     {
       "slug": "product-employee-survey",
       "url": "https://www.vantagecircle.com/products/employee-survey/",
-      "label": "Product — Employee Survey",
+      "label": "Product \u2014 Employee Survey",
       "notes": "Form lazy-loads into .hubspot-form-container at #form.",
       "preActions": [
-        { "type": "scrollTo", "selector": "#form, .hubspot-form-container" },
-        { "type": "wait", "ms": 2500 }
-      ]
+        {
+          "type": "scrollTo",
+          "selector": "#form, .hubspot-form-container"
+        },
+        {
+          "type": "wait",
+          "ms": 2500
+        }
+      ],
+      "expectScheduler": true
     },
     {
       "slug": "product-employee-discount",
       "url": "https://www.vantagecircle.com/products/employee-discount/",
-      "label": "Product — Employee Discount",
+      "label": "Product \u2014 Employee Discount",
       "notes": "Form lazy-loads into .hubspot-form-container at #perksForm.",
       "preActions": [
-        { "type": "scrollTo", "selector": "#perksForm, .hubspot-form-container" },
-        { "type": "wait", "ms": 2500 }
-      ]
+        {
+          "type": "scrollTo",
+          "selector": "#perksForm, .hubspot-form-container"
+        },
+        {
+          "type": "wait",
+          "ms": 2500
+        }
+      ],
+      "expectScheduler": true
     },
     {
       "slug": "vantagefit-request-demo",
       "url": "https://www.vantagefit.io/request-demo/",
-      "label": "Vantage Fit — Request Demo",
-      "notes": "Separate domain (vantagefit.io). Lead-capture demo form — assume captcha-protected; front-end health only.",
-      "captchaProtected": true
+      "label": "Vantage Fit \u2014 Request Demo",
+      "notes": "Separate domain (vantagefit.io). Lead-capture demo form \u2014 assume captcha-protected; front-end health only.",
+      "captchaProtected": true,
+      "expectScheduler": true
     }
   ]
 }
